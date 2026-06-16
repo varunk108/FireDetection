@@ -3,3 +3,4 @@ uvicorn
 python-multipart
 huggingface_hub
 ultralytics
+opencv-python
