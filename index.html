@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PyroShield — Fire & Person Detection</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --panel: #141b24;
+    --panel-2: #1c2630;
+    --border: #263340;
+    --text: #e6edf3;
+    --muted: #8a99a8;
+    --blue: #2d7ef7;
+    --fire: #ff4d2d;
+    --green: #00e676;
+    --amber: #ffae42;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 20px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  header h1 { font-size: 20px; font-weight: 700; margin: 0; }
+  .logo {
+    width: 34px; height: 34px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--fire), var(--amber));
+    display: grid; place-items: center; font-size: 18px;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 18px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .card h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--muted); margin: 0 0 12px; font-weight: 600;
+  }
+
+  /* video */
+  #wrapper { position: relative; width: 100%; aspect-ratio: 4/3; background:#000; border-radius: 10px; overflow: hidden; }
+  video, #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  #overlay { pointer-events: none; }
+
+  .controls { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  button {
+    padding: 10px 16px; border: none; border-radius: 8px;
+    background: var(--blue); color: #fff; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: opacity .15s;
+  }
+  button.secondary { background: var(--panel-2); border: 1px solid var(--border); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button:hover:not(:disabled) { opacity: .9; }
+
+  /* fire alert banner */
+  #alert {
+    display: none;
+    align-items: center; gap: 12px;
+    background: var(--fire); color: #fff;
+    padding: 14px 18px; border-radius: 10px; margin-bottom: 16px;
+    font-weight: 700; font-size: 16px;
+    box-shadow: 0 0 0 0 rgba(255,77,45,.6);
+  }
+  #alert.active { display: flex; animation: pulse 1s infinite; }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(255,77,45,.6); }
+    70%  { box-shadow: 0 0 0 14px rgba(255,77,45,0); }
+    100% { box-shadow: 0 0 0 0 rgba(255,77,45,0); }
+  }
+  .alert-icon { font-size: 22px; }
+
+  /* stat tiles */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px;
+  }
+  .stat .val { font-size: 26px; font-weight: 700; line-height: 1; }
+  .stat .lbl { font-size: 11px; color: var(--muted); margin-top: 4px; text-transform: uppercase; }
+  .stat.fire .val { color: var(--fire); }
+  .stat.person .val { color: var(--blue); }
+
+  .meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 12px; }
+
+  /* slider */
+  .slider-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  input[type=range] { flex: 1; accent-color: var(--blue); }
+  .conf-val { font-variant-numeric: tabular-nums; width: 38px; text-align: right; }
+
+  /* status dot */
+  .status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+  /* log */
+  #log { max-height: 240px; overflow-y: auto; font-size: 12.5px; }
+  .log-item {
+    display: flex; gap: 8px; padding: 7px 0;
+    border-bottom: 1px solid var(--border); color: var(--muted);
+  }
+  .log-item:last-child { border-bottom: none; }
+  .log-item .t { color: #5d6b78; font-variant-numeric: tabular-nums; }
+  .log-item.fire { color: var(--fire); font-weight: 600; }
+  .log-empty { color: #5d6b78; font-style: italic; padding: 8px 0; }
+
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; margin-top: 10px; }
+  .switch { position: relative; width: 40px; height: 22px; }
+  .switch input { display: none; }
+  .switch .track { position: absolute; inset: 0; background: var(--panel-2); border:1px solid var(--border); border-radius: 22px; transition: .2s; }
+  .switch .track::before { content:""; position:absolute; width:16px; height:16px; border-radius:50%; background:#fff; top:2px; left:3px; transition:.2s; }
+  .switch input:checked + .track { background: var(--blue); }
+  .switch input:checked + .track::before { transform: translateX(17px); }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">🔥</div>
+    <h1>PyroShield Detection Console</h1>
+  </header>
+
+  <div id="alert">
+    <span class="alert-icon">⚠️</span>
+    <span id="alertText">FIRE DETECTED</span>
+  </div>
+
+  <div class="layout">
+    <!-- LEFT: video -->
+    <div class="card">
+      <div id="wrapper">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="controls">
+        <button id="startBtn">▶ Start Camera</button>
+        <button id="stopBtn" class="secondary" disabled>■ Stop</button>
+        <button id="snapBtn" class="secondary" disabled>📷 Snapshot</button>
+      </div>
+      <div class="meta">
+        <div class="status"><span id="dot" class="dot"></span><span id="statusText">Camera off</span></div>
+        <div><span id="fps">0</span> FPS · <span id="latency">0</span> ms</div>
+      </div>
+    </div>
+
+    <!-- RIGHT: panel -->
+    <div style="display:flex; flex-direction:column; gap:18px;">
+      <div class="card">
+        <h2>Live Detections</h2>
+        <div class="stats">
+          <div class="stat person"><div class="val" id="personCount">0</div><div class="lbl">Persons</div></div>
+          <div class="stat fire"><div class="val" id="fireCount">0</div><div class="lbl">Fire / Smoke</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Settings</h2>
+        <div class="lbl" style="font-size:12px;color:var(--muted)">Confidence threshold</div>
+        <div class="slider-row">
+          <input type="range" id="conf" min="10" max="90" value="25" />
+          <span class="conf-val" id="confVal">0.25</span>
+        </div>
+        <div class="toggle-row">
+          <span>Alert sound</span>
+          <label class="switch"><input type="checkbox" id="soundToggle" checked /><span class="track"></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Event Log</h2>
+        <div id="log"><div class="log-empty">No events yet.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <canvas id="capture" width="640" height="480" style="display:none;"></canvas>
+
+<script>
+const API_URL = "http://localhost:8000/detect/frame";
+const DETECT_INTERVAL = 350;
+
+const video = document.getElementById("video");
+const overlay = document.getElementById("overlay");
+const capture = document.getElementById("capture");
+const octx = overlay.getContext("2d");
+const cctx = capture.getContext("2d");
+
+const els = {
+  start: document.getElementById("startBtn"),
+  stop: document.getElementById("stopBtn"),
+  snap: document.getElementById("snapBtn"),
+  status: document.getElementById("statusText"),
+  dot: document.getElementById("dot"),
+  fps: document.getElementById("fps"),
+  latency: document.getElementById("latency"),
+  personCount: document.getElementById("personCount"),
+  fireCount: document.getElementById("fireCount"),
+  alert: document.getElementById("alert"),
+  alertText: document.getElementById("alertText"),
+  conf: document.getElementById("conf"),
+  confVal: document.getElementById("confVal"),
+  sound: document.getElementById("soundToggle"),
+  log: document.getElementById("log"),
+};
+
+const COLORS = { person: "#2d7ef7", fire: "#ff4d2d", smoke: "#ffae42" };
+
+let stream = null, loopId = null, busy = false;
+let frameTimes = [];
+let fireActive = false;
+let lastFireLogTs = 0;
+let logEmpty = true;
+
+// --- confidence slider ---
+els.conf.addEventListener("input", () => {
+  els.confVal.textContent = (els.conf.value / 100).toFixed(2);
+});
+
+// --- alert sound via WebAudio (no file needed) ---
+let audioCtx = null;
+function beep() {
+  if (!els.sound.checked) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = "square";
+    o.frequency.setValueAtTime(880, audioCtx.currentTime);
+    o.frequency.setValueAtTime(660, audioCtx.currentTime + 0.15);
+    g.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + 0.4);
+  } catch (e) {}
+}
+
+function now() { return new Date().toLocaleTimeString(); }
+
+function addLog(text, isFire = false) {
+  if (logEmpty) { els.log.innerHTML = ""; logEmpty = false; }
+  const item = document.createElement("div");
+  item.className = "log-item" + (isFire ? " fire" : "");
+  item.innerHTML = `<span class="t">${now()}</span><span>${text}</span>`;
+  els.log.prepend(item);
+  while (els.log.children.length > 50) els.log.removeChild(els.log.lastChild);
+}
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+  } catch (e) {
+    els.status.textContent = "Camera access denied";
+    return;
+  }
+  video.srcObject = stream;
+  await video.play();
+  syncCanvasSize();
+  els.start.disabled = true;
+  els.stop.disabled = false;
+  els.snap.disabled = false;
+  els.dot.classList.add("live");
+  els.status.textContent = "Live";
+  addLog("Camera started");
+  loopId = setInterval(detectFrame, DETECT_INTERVAL);
+}
+
+function stopCamera() {
+  if (loopId) clearInterval(loopId);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  els.start.disabled = false;
+  els.stop.disabled = true;
+  els.snap.disabled = true;
+  els.dot.classList.remove("live");
+  els.status.textContent = "Camera off";
+  els.fps.textContent = "0";
+  clearAlert();
+  addLog("Camera stopped");
+}
+
+function syncCanvasSize() {
+  overlay.width = video.videoWidth || 640;
+  overlay.height = video.videoHeight || 480;
+  capture.width = overlay.width;
+  capture.height = overlay.height;
+}
+
+async function detectFrame() {
+  if (busy || video.readyState !== 4) return;
+  busy = true;
+  const t0 = performance.now();
+
+  cctx.drawImage(video, 0, 0, capture.width, capture.height);
+  const dataUrl = capture.toDataURL("image/jpeg", 0.7);
+  const conf = els.conf.value / 100;
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: dataUrl, conf }),
+    });
+    const data = await res.json();
+    const dets = (data.detections || []).filter(d => d.confidence >= conf);
+    drawDetections(dets);
+    updateStats(dets);
+
+    const lat = Math.round(performance.now() - t0);
+    els.latency.textContent = lat;
+    trackFps();
+  } catch (err) {
+    els.status.textContent = "Backend error";
+  } finally {
+    busy = false;
+  }
+}
+
+function trackFps() {
+  const t = performance.now();
+  frameTimes.push(t);
+  frameTimes = frameTimes.filter(x => t - x < 1000);
+  els.fps.textContent = frameTimes.length;
+}
+
+function drawDetections(dets) {
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  octx.lineWidth = 2.5;
+  octx.font = "bold 15px sans-serif";
+
+  dets.forEach(d => {
+    const [x1, y1, x2, y2] = d.box;
+    const color = COLORS[d.label.toLowerCase()] || "#00e676";
+    octx.strokeStyle = color;
+    octx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+
+    const text = `${d.label} ${(d.confidence * 100).toFixed(0)}%`;
+    const tw = octx.measureText(text).width;
+    octx.fillStyle = color;
+    octx.fillRect(x1, y1 - 20, tw + 10, 20);
+    octx.fillStyle = "#fff";
+    octx.fillText(text, x1 + 5, y1 - 5);
+  });
+}
+
+function updateStats(dets) {
+  let persons = 0, fires = 0;
+  dets.forEach(d => {
+    const l = d.label.toLowerCase();
+    if (l === "person") persons++;
+    else if (l === "fire") fires++;   // only true fire triggers the count/alarm
+    // "smoke", "other", etc. are ignored for the alarm
+  });
+  els.personCount.textContent = persons;
+  els.fireCount.textContent = fires;
+
+  if (fires > 0) triggerAlert(fires);
+  else clearAlert();
+}
+
+function triggerAlert(count) {
+  els.alert.classList.add("active");
+  els.alertText.textContent = `FIRE DETECTED — ${count} source${count > 1 ? "s" : ""}`;
+  const t = performance.now();
+  if (!fireActive || t - lastFireLogTs > 5000) {
+    addLog(`🔥 Fire detected (${count} source${count > 1 ? "s" : ""})`, true);
+    beep();
+    lastFireLogTs = t;
+  }
+  fireActive = true;
+}
+
+function clearAlert() {
+  if (fireActive) addLog("Fire cleared");
+  els.alert.classList.remove("active");
+  fireActive = false;
+}
+
+function snapshot() {
+  const c = document.createElement("canvas");
+  c.width = overlay.width; c.height = overlay.height;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(video, 0, 0, c.width, c.height);
+  ctx.drawImage(overlay, 0, 0, c.width, c.height);
+  const a = document.createElement("a");
+  a.download = `detection_${Date.now()}.png`;
+  a.href = c.toDataURL("image/png");
+  a.click();
+  addLog("Snapshot saved");
+}
+
+els.start.addEventListener("click", startCamera);
+els.stop.addEventListener("click", stopCamera);
+els.snap.addEventListener("click", snapshot);
+</script>
+</body>
+</html>
